@@ -23,56 +23,58 @@
  *
  ***********************/ 
 
-/*
-//Test dta to be transmitted
-const unsigned char TXDataPayload [] = {
-					RFID_TAG_STARTING_WRITE_ADDRESS_MSB,
-					RFID_TAG_STARTING_WRITE_ADDRESS_LSB,
-					0xD1, 0x22, 0x33, 0x44, 
-					0x55, 0x66, 0x77, 0x88, 
-					0x99, 0xAA, 0xBB, 0xCC,
-					0xDD, 0xEE, 0xFF, 0xAB
-				       }; 
-					
-//Length of TXDataPayload (that we want to send) 
-const unsigned char TXDataLength = 18;
-*/
+//Data to be sent
+static volatile unsigned char * data = 0;
 
-volatile unsigned char * TXDataPayload;
+//Length of data to be sent in bytes
+static volatile unsigned char dataLen = 0;
 
-volatile unsigned char * TXDataLength;
+//Keep track of current byte to send
+static volatile unsigned char TXByteCounter = 0;	
 
-
-//boolean to determine message finished transmitting
-static volatile unsigned char messageSent = 0;
-
-//boolean to track if security session has been opened
+//Track if security session is open, necessary to write to user memory of the tag
 static volatile unsigned char isSecuritySessionOpen = 0;
 
-
-/* STATIC FUNC */
-
-
-//Sets new peripheral address for I2C bus, necessary to switch commands
-//for the RFID tag
-void setNewPeripheralAddress(unsigned char peripheralAddress){
-
-	//Set new address
-	UCB2I2CSA = peripheralAddress;
-
-}
-
-void setNewPayload(volatile unsigned char * payload, volatile unsigned char * payloadLength){
-	TXDataPayload = payload;
-	TXDataLength = payloadLength;
-}
+//Define how many times to retry before failing
+const int MAX_RETRIES = 3;
+    
+static volatile I2C_Status status;
 
 
+//Length of the SecuriryMessage to transmit 
+static volatile unsigned char StartSecuritySessionMessageLength = 19;
 
-
-
-
-
+// Message to open security session of RFID Tag.
+//
+// RFID_TAG_I2C_PASSWORD repeated 8 times for the 64 bit password.
+//
+// Password MUST be sent TWICE to present password.
+//
+// The second "RFID_TAG_I2C_PASSWORD_ADDRESS_MSB" is a
+// verification step.
+//
+// In this case, the PASSWORD define is just 0s (no password)
+static volatile unsigned char StartSecuritySessionMessage [19] = {
+	RFID_TAG_I2C_PASSWORD_ADDRESS_MSB,
+	RFID_TAG_I2C_PASSWORD_ADDRESS_LSB,
+	RFID_TAG_I2C_PASSWORD, 
+	RFID_TAG_I2C_PASSWORD, 
+	RFID_TAG_I2C_PASSWORD, 
+	RFID_TAG_I2C_PASSWORD, 
+	RFID_TAG_I2C_PASSWORD, 
+	RFID_TAG_I2C_PASSWORD, 
+	RFID_TAG_I2C_PASSWORD, 
+	RFID_TAG_I2C_PASSWORD, 
+	RFID_TAG_I2C_PASSWORD_ADDRESS_MSB,
+	RFID_TAG_I2C_PASSWORD, 
+	RFID_TAG_I2C_PASSWORD, 
+	RFID_TAG_I2C_PASSWORD, 
+	RFID_TAG_I2C_PASSWORD, 
+	RFID_TAG_I2C_PASSWORD, 
+	RFID_TAG_I2C_PASSWORD, 
+	RFID_TAG_I2C_PASSWORD, 
+	RFID_TAG_I2C_PASSWORD
+};	
 
 
 
@@ -98,26 +100,13 @@ void setNewPayload(volatile unsigned char * payload, volatile unsigned char * pa
  */ 
 void initializeI2C(){
 	
-	//Power CS
-	P3OUT |= BIT7;
-	P3DIR |= BIT7;
-
-
 	//Configure I2C pins
 	P7SEL0 |= BIT1 | BIT0;
 	P7SEL1 &= ~(BIT1 | BIT0);
 	
-	P1SEL0 |= BIT6 | BIT7;
-	P1SEL1 &= ~(BIT6 | BIT7);
-	
-
 	//Configure pull-up resistors for I2C bus (10k)
 	P7REN |= BIT0 | BIT1; // pull up/down enabled
    	P7OUT |= BIT0 | BIT1; // pull up enabled
-
-	P1REN |= BIT6 | BIT7; // pull up/down enabled
-   	P1OUT |= BIT6 | BIT7; // pull up enabled
-
 
 	//Software reset enabled, necessary to change configurations
 	//I2C bus usable while this is seti
@@ -125,19 +114,16 @@ void initializeI2C(){
 
 	//Enables I2C Mode, Controller mode, sync mode, select SMCLK
 	UCB2CTLW0 |= UCMODE_3 | UCMST | UCSYNC | UCSSEL__SMCLK;
-
+	
 	//Baudrate = SMCLK / 8
 	//Possible to change which clock is selected for divison
 	UCB2BRW = 0x0008;
 
-	//Peripheral Address
-	UCB2I2CSA = RFID_TAG_I2C_SECURITY_SESSION_CMD;
-
-	//Clear software reset, put I2C bus into operation
+    //Clear software reset, put I2C bus into operation
 	UCB2CTLW0 &= ~UCSWRST;
 
 	//Enable transmit and not ack interrupt
-	UCB2IE |= UCTXIE0 | UCNACKIE; 
+	UCB2IE |= UCTXIE0 | UCNACKIE;
 }
 
 
@@ -147,150 +133,119 @@ void initializeI2C(){
 //TX interrupt is active for I2C. 
 //This utilizes the hardware clock management of the MSP430 to make deadlines for data payload and ACKs
 //Function should be called once per byte of a message (i.e. 11 byte message needs this to be called 11 times)
-void writeI2CMessage(const volatile unsigned char * transmitData, const volatile unsigned char * dataLength){
+/*void writeI2CMessage(const volatile unsigned char * transmitData, const volatile unsigned char * dataLength){
 	
-	//Keep track of current byte to send
-	static unsigned char TXByteCounter = 0;	
-	
-	//Keeps track of current address
-	static unsigned int currentAddress = RFID_TAG_STARTING_WRITE_ADDRESS_FULL;
-
+	status = I2C_TRANSACTION_INPROGRESS;
 
 	if(TXByteCounter < *dataLength){	
+		
 		//Load data into transmit buffer
 		UCB2TXBUF = transmitData[TXByteCounter];
-		
-		//increase current byte
 		TXByteCounter++;
 	
 	} else {
 		
 		//Message is sent
-		messageSent = 1;
-
-		//Increase the currentAddress, setting it to next free space
-		currentAddress += *dataLength;
-		
-		//If address greater than last writable address, wrap back to start
-		//of writing space
-		if(currentAddress >= RFID_TAG_ENDING_WRITE_ADDRESS_FULL){
-			currentAddress = RFID_TAG_STARTING_WRITE_ADDRESS_FULL;
-
-		}
+		status = I2C_TRANSACTION_SUCCESS;	
 
 		//Resets byte counter
 		TXByteCounter = 0; 
-		
-		//Send stop condition
-		UCB2CTLW0 |= UCTXSTP;
-
-		//Clear transmit interrupt flag
-		UCB2IFG &= ~UCTXIFG;
 	
 	}
-}
+}*/
 
-//Opens the RFID Tag's security session, presents the default password with it
-void startSecuritySession(){
-
-	//Length of the message to transmit 
-	const unsigned char MessageLength = 19;
-
-	//Message to open security session of RFID Tag
-	//RFID_TAG_I2C_PASSWORD repeated 8 times for the 64 bit password
-	//Password MUST be sent TWICE to present password
-	//the second "RFID_TAG_I2C_PASSWORD_ADDRESS_MSB" is a
-	//verification step
-	const unsigned char StartSecuritySessionMessage [] = {
-							      RFID_TAG_I2C_PASSWORD_ADDRESS_MSB,
-							      RFID_TAG_I2C_PASSWORD_ADDRESS_LSB,
-							      RFID_TAG_I2C_PASSWORD, 
-							      RFID_TAG_I2C_PASSWORD, 
-							      RFID_TAG_I2C_PASSWORD, 
-							      RFID_TAG_I2C_PASSWORD, 
-							      RFID_TAG_I2C_PASSWORD, 
-							      RFID_TAG_I2C_PASSWORD, 
-							      RFID_TAG_I2C_PASSWORD, 
-							      RFID_TAG_I2C_PASSWORD, 
-							      RFID_TAG_I2C_PASSWORD_ADDRESS_MSB,
-							      RFID_TAG_I2C_PASSWORD, 
-							      RFID_TAG_I2C_PASSWORD, 
-							      RFID_TAG_I2C_PASSWORD, 
-							      RFID_TAG_I2C_PASSWORD, 
-							      RFID_TAG_I2C_PASSWORD, 
-							      RFID_TAG_I2C_PASSWORD, 
-							      RFID_TAG_I2C_PASSWORD, 
-							      RFID_TAG_I2C_PASSWORD
-							     };	
-
+void writeI2CMessage() {
+    status = I2C_TRANSACTION_INPROGRESS;
+    
+	if(TXByteCounter < dataLen){	
+		
+		//Load data into transmit buffer
+		UCB2TXBUF = data[TXByteCounter];
+		TXByteCounter++;
 	
-	//Present password for RFID TAG	
-	writeI2CMessage(StartSecuritySessionMessage, &MessageLength);
-}
-
-void sendMessage(volatile unsigned char * message, volatile unsigned char * messageLength){
-	if(data[1] < RFID_TAG_ENDING_WRITE_ADDRESS_LSB){
-		data[1] += dataLen;
 	} else {
-		data[1] = RFID_TAG_STARTING_WRITE_ADDRESS_LSB;
-	}
-	//Ensure stop condition is sent
-	while(UCB2CTLW0 & UCTXSTP); 
-
-	setNewPayload(message, messageLength);
-
-	//Set I2C to TX, send start condition
-	UCB2CTLW0 |= UCTR | UCTXSTT;
-
-	//Enter low power mode and await interrupts
-	__bis_SR_register(LPM3_bits | GIE);
-
-	//If security session is open, writing is now open for user memory
-	if(isSecuritySessionOpen){
 		
-		//Change target area to user memory to write to
-		setNewPeripheralAddress(RFID_TAG_USER_MEMORY_CMD);
-	} else {
-		startSecuritySession();
-	}
+		//Message is sent
+		status = I2C_TRANSACTION_SUCCESS;	
 
-	//Prepare to send another message
-	messageSent = 0;
-}
-
-int main(void) {
-
-	//Disable watchdog
-	WDTCTL = WDTPW | WDTHOLD;
-
-	// Disable the GPIO power-on default high-impedance mode to activate
-	// previously configured port settings
-	PM5CTL0 &= ~LOCKLPM5;
-
-	//Configure USCI_B2 for I2C Mode, 0 passed in for NO automatic stop
-	initializeI2C(); 
-	
-	
-	volatile unsigned char data [] = {
-					  RFID_TAG_STARTING_WRITE_ADDRESS_MSB,
-					  RFID_TAG_STARTING_WRITE_ADDRESS_LSB,
-					  0xD0, 0xD1, 0xB2, 0xB3
-					 };
-	
-	volatile unsigned char dataLen = 6;
-
-	while(1){
-
-		__delay_cycles(10000);
-		sendMessage(data, &dataLen);
-		
-		
+		//Resets byte counter
+		TXByteCounter = 0; 	
 	}
 }
 
+void startSecuritySession() {
+    UCB2I2CSA = RFID_TAG_SECURITY_SESSION_CMD;
+    status = sendMessage(StartSecuritySessionMessage, StartSecuritySessionMessageLength);
+    if(status == I2C_TRANSACTION_SUCCESS) {
+        isSecuritySessionOpen = 1;
+    }
+}
 
-// initializeI2C();
-// sendMessage();
+
+//Sends a message given a array of bytes and length to I2C, returns if message was sent successfully or not
+I2C_Status sendMessage(volatile unsigned char * message, volatile unsigned char messageLength) {
+	 
+
+	// Wait until stop condition has been sent
+	while(UCB2CTLW0 & UCTXSTP);
+
+	// Initial status of NONE
+	status = I2C_TRANSACTION_NONE;
+
+	for (int x = 0; x < MAX_RETRIES; x++) {
+
+        // If the first attempt fails (NACK'd),
+		// assume that the security session was NOT open
+		/*if (!isSecuritySessionOpen) {
+
+			// Set peripheral address to open security session
+			UCB2I2CSA = RFID_TAG_SECURITY_SESSION_CMD;
+
+			data = StartSecuritySessionMessage;
+			dataLen = StartSecuritySessionMessageLength;
+
+		} else {
+
+			// Set peripheral address to write to user memory
+			UCB2I2CSA = RFID_TAG_USER_MEMORY_CMD;
+
+
+			// Attempt to send user's message
+			// Set global variables for ISR
+			data = message;
+			dataLen = messageLength;	
+		}*/
+        if(isSecuritySessionOpen) {
+            UCB2I2CSA = RFID_TAG_USER_MEMORY_CMD;
+        }
+        data = message;
+        dataLen = messageLength;
+
+		// Wait until stop condition has been sent
+		while(UCB2CTLW0 & UCTXSTP);
+
+		//Clear pending interrupt flags
+		UCB2IFG = 0;
+		
+		//Become transmitter and send start condition
+		UCB2CTLW0 |= UCTR | UCTXSTT;
+		
+		//Sleep and wait for data to be sent
+        __bis_SR_register(LPM3_bits | GIE);
+        
+       	//Check if message was sent successfully 
+        if (status == I2C_TRANSACTION_SUCCESS) {
+			//isSecuritySessionOpen = status == I2C_TRANSACTION_SUCCESS ? 1 : 0;  
+
+			//Transacation was successful, return
+            return I2C_TRANSACTION_SUCCESS;
+		}
+	}
+
+	return I2C_TRANSACTION_NACK;
+}
+
+
 
 /*****************************************
  *
@@ -320,6 +275,12 @@ void __attribute__ ((interrupt(EUSCI_B2_VECTOR))) USCI_B2_ISR (void)
 			//Must send stop condition
 			UCB2CTLW0 |= UCTXSTP;
 			
+			//Clear NACK interrupt flag
+			UCB2IFG &= ~UCTXIFG;
+            
+            TXByteCounter = 0;
+			status = I2C_TRANSACTION_NACK;
+
 			//Break out of LPM3
 			__bic_SR_register_on_exit(LPM3_bits);
 			
@@ -330,25 +291,33 @@ void __attribute__ ((interrupt(EUSCI_B2_VECTOR))) USCI_B2_ISR (void)
 		case USCI_I2C_UCTXIFG0:
 			
 			//If security session NOT open, then open it 
-			if(!isSecuritySessionOpen){
+			//Unable to write to tag unless session is open, so keep retrying each time
+			/*if(!isSecuritySessionOpen){
 				startSecuritySession();
+				isSecuritySessionOpen = status == I2C_TRANSACTION_SUCCESS ? 1 : 0;  
+			}*/
 
-				//Checks if security message has been sent
-				isSecuritySessionOpen = messageSent;
-			} else {
-				//Security session is open, able to write to memory	
-				//Write payload
-				writeI2CMessage(TXDataPayload, TXDataLength);
-			}
-			
+			// Check again, we still want to send original message if we opened security session
+			// successfully
+			//if(isSecuritySessionOpen){
+					
+				// Write user payload
+			//writeI2CMessage(data, &dataLen);
+			//}
+			writeI2CMessage();
 
-			//Self-explanatory
-			if(messageSent){
+			// Check if the message was sent or not, use INPROGRESS because status
+			// can be NACK or SUCCESS
+			if(status != I2C_TRANSACTION_INPROGRESS){
+				
+				//Clear transmit interrupt flag
+				UCB2IFG &= ~UCTXIFG;
 
 				//exit low power mode 3 	
 				__bic_SR_register_on_exit(LPM3_bits);
+				
 			}
-			
+
 			break;
 		
 			

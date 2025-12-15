@@ -31,6 +31,9 @@ ST25DV64KC.elf:	ST25DV64KC.c $(INCL_H) $(INCL_SRC)
 # Upload to board
 install_ST25DV64KC:	ST25DV64KC.elf
 	mspdebug $(DRIVER) "prog ST25DV64KC.elf" --allow-fw-update
-	
+
+gdb:
+	msp430-elf-gdb --ex "file ST25DV64KC.elf" --ex "target remote localhost:2000" --ex "load ST25DV64KC.elf"
+
 clean:
 	rm -f  *.o *.elf
