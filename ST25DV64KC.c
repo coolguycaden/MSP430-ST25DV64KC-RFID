@@ -1,6 +1,6 @@
 /***************************
  * Author: Caden Allen
- * Date: 2/21/2025
+ * Date: TODO: 
  * 
  * Purpose: Simple RFID communication between msp430FR5994 and
  * ST25DV64KC. To be implemented into Dr. Tobias' project.
@@ -12,7 +12,6 @@
  *
  ***************************/ 
 
-#include <msp430fr5994.h>
 #include "ST25DV64KC.h"
 
 
@@ -23,17 +22,12 @@
  *
  ***********************/ 
 
-//Data to be sent
-static volatile unsigned char * data = 0;
-
-//Length of data to be sent in bytes
-static volatile unsigned char dataLen = 0;
-
-//Keep track of current byte to send
-static volatile unsigned char TXByteCounter = 0;	
+static volatile uint8_t * TX_Payload;
+static volatile uint32_t * TX_Length;
+static volatile uint32_t TX_ByteCounter;
 
 //Track if security session is open, necessary to write to user memory of the tag
-static volatile unsigned char isSecuritySessionOpen = 0;
+static volatile uint8_t isSecuritySessionOpen = 0;
 
 //Define how many times to retry before failing
 const int MAX_RETRIES = 3;
@@ -42,7 +36,7 @@ static volatile I2C_Status status;
 
 
 //Length of the SecuriryMessage to transmit 
-static volatile unsigned char StartSecuritySessionMessageLength = 19;
+static volatile uint32_t StartSecuritySessionMessageLength = 19;
 
 // Message to open security session of RFID Tag.
 //
@@ -54,7 +48,7 @@ static volatile unsigned char StartSecuritySessionMessageLength = 19;
 // verification step.
 //
 // In this case, the PASSWORD define is just 0s (no password)
-static volatile unsigned char StartSecuritySessionMessage [19] = {
+static volatile uint8_t StartSecuritySessionMessage [19] = {
 	RFID_TAG_I2C_PASSWORD_ADDRESS_MSB,
 	RFID_TAG_I2C_PASSWORD_ADDRESS_LSB,
 	RFID_TAG_I2C_PASSWORD, 
@@ -82,11 +76,69 @@ static volatile unsigned char StartSecuritySessionMessage [19] = {
 
 
 
+
+/***********************
+*
+* Helper Function Implementations
+*
+**********************/ 
+
+
+void sleepAndWriteI2C() {
+
+    // Wait until stop condition has been sent
+    while(UCB2CTLW0 & UCTXSTP);
+
+    //Clear pending interrupt flags
+    UCB2IFG = 0;
+
+    //Become transmitter and send start condition
+    UCB2CTLW0 |= UCTR | UCTXSTT;
+
+    //Sleep and wait for data to be sent
+    __bis_SR_register(LPM3_bits | GIE);
+}
+
+
+
+
+
+
+
 /***********************
  *
- * Function Implementations
+ * Static Function Implementations
  *
  **********************/ 
+
+
+
+static I2C_Status openSecuritySession() {
+    for(uint32_t x = 0; x < MAX_RETRIES; x++) {
+     
+        TX_Payload = StartSecuritySessionMessage;
+        TX_Length = &StartSecuritySessionMessageLength;
+    
+        sleepAndWriteI2C();
+
+        if(status == I2C_TRANSACTION_SUCCESS) {
+            return status;
+        }
+    }
+
+    return I2C_TRANSACTION_NACK;
+}
+
+
+
+
+
+/***********************
+ *
+ * User Function Implementations
+ *
+ **********************/ 
+
 
 
 /******************************************
@@ -113,7 +165,7 @@ void initializeI2C(){
 	UCB2CTLW0 |= UCSWRST; 
 
 	//Enables I2C Mode, Controller mode, sync mode, select SMCLK
-	UCB2CTLW0 |= UCMODE_3 | UCMST | UCSYNC | UCSSEL__SMCLK;
+	UCB2CTLW0 |= UCMODE_3 | UCMST | UCSSEL__SMCLK;
 	
 	//Baudrate = SMCLK / 8
 	//Possible to change which clock is selected for divison
@@ -127,115 +179,51 @@ void initializeI2C(){
 }
 
 
+void writeI2CByte() {
+    static uint8_t successful_transaction = 0; 
 
-
-//Implements modular message sending, meant to be called multiple times in a row while
-//TX interrupt is active for I2C. 
-//This utilizes the hardware clock management of the MSP430 to make deadlines for data payload and ACKs
-//Function should be called once per byte of a message (i.e. 11 byte message needs this to be called 11 times)
-/*void writeI2CMessage(const volatile unsigned char * transmitData, const volatile unsigned char * dataLength){
-	
-	status = I2C_TRANSACTION_INPROGRESS;
-
-	if(TXByteCounter < *dataLength){	
-		
-		//Load data into transmit buffer
-		UCB2TXBUF = transmitData[TXByteCounter];
-		TXByteCounter++;
-	
-	} else {
-		
-		//Message is sent
-		status = I2C_TRANSACTION_SUCCESS;	
-
-		//Resets byte counter
-		TXByteCounter = 0; 
-	
-	}
-}*/
-
-void writeI2CMessage() {
     status = I2C_TRANSACTION_INPROGRESS;
-    
-	if(TXByteCounter < dataLen){	
+     
+	if(TX_ByteCounter < *TX_Length){	
 		
 		//Load data into transmit buffer
-		UCB2TXBUF = data[TXByteCounter];
-		TXByteCounter++;
+		UCB2TXBUF = TX_Payload[TX_ByteCounter];
+		TX_ByteCounter++;
 	
 	} else {
 		
 		//Message is sent
-		status = I2C_TRANSACTION_SUCCESS;	
+		status = I2C_TRANSACTION_FINISHED;	
 
 		//Resets byte counter
-		TXByteCounter = 0; 	
+		TX_ByteCounter = 0; 	
 	}
 }
-
-void startSecuritySession() {
-    UCB2I2CSA = RFID_TAG_SECURITY_SESSION_CMD;
-    status = sendMessage(StartSecuritySessionMessage, StartSecuritySessionMessageLength);
-    if(status == I2C_TRANSACTION_SUCCESS) {
-        isSecuritySessionOpen = 1;
-    }
-}
-
 
 //Sends a message given a array of bytes and length to I2C, returns if message was sent successfully or not
-I2C_Status sendMessage(volatile unsigned char * message, volatile unsigned char messageLength) {
+I2C_Status sendMessage(volatile uint8_t * message, volatile uint32_t messageLength) {
 	 
 
-	// Wait until stop condition has been sent
+    // Wait until stop condition has been sent
 	while(UCB2CTLW0 & UCTXSTP);
 
 	// Initial status of NONE
 	status = I2C_TRANSACTION_NONE;
-
-	for (int x = 0; x < MAX_RETRIES; x++) {
-
-        // If the first attempt fails (NACK'd),
-		// assume that the security session was NOT open
-		/*if (!isSecuritySessionOpen) {
-
-			// Set peripheral address to open security session
-			UCB2I2CSA = RFID_TAG_SECURITY_SESSION_CMD;
-
-			data = StartSecuritySessionMessage;
-			dataLen = StartSecuritySessionMessageLength;
-
-		} else {
-
-			// Set peripheral address to write to user memory
-			UCB2I2CSA = RFID_TAG_USER_MEMORY_CMD;
+    
+    if(!isSecuritySessionOpen){
+        openSecuritySession();      
+    }
 
 
-			// Attempt to send user's message
-			// Set global variables for ISR
-			data = message;
-			dataLen = messageLength;	
-		}*/
-        if(isSecuritySessionOpen) {
-            UCB2I2CSA = RFID_TAG_USER_MEMORY_CMD;
-        }
-        data = message;
-        dataLen = messageLength;
+	for (int x = 0; x < MAX_RETRIES; x++) {   
+        TX_Payload = message; 
+        TX_Length = &messageLength; 
 
-		// Wait until stop condition has been sent
-		while(UCB2CTLW0 & UCTXSTP);
+		sleepAndWriteI2C();
 
-		//Clear pending interrupt flags
-		UCB2IFG = 0;
-		
-		//Become transmitter and send start condition
-		UCB2CTLW0 |= UCTR | UCTXSTT;
-		
-		//Sleep and wait for data to be sent
-        __bis_SR_register(LPM3_bits | GIE);
-        
        	//Check if message was sent successfully 
         if (status == I2C_TRANSACTION_SUCCESS) {
-			//isSecuritySessionOpen = status == I2C_TRANSACTION_SUCCESS ? 1 : 0;  
+			isSecuritySessionOpen = status == I2C_TRANSACTION_SUCCESS ? 1 : 0;  
 
 			//Transacation was successful, return
             return I2C_TRANSACTION_SUCCESS;
@@ -278,7 +266,7 @@ void __attribute__ ((interrupt(EUSCI_B2_VECTOR))) USCI_B2_ISR (void)
 			//Clear NACK interrupt flag
 			UCB2IFG &= ~UCTXIFG;
             
-            TXByteCounter = 0;
+            TX_ByteCounter = 0;
 			status = I2C_TRANSACTION_NACK;
 
 			//Break out of LPM3
@@ -290,21 +278,7 @@ void __attribute__ ((interrupt(EUSCI_B2_VECTOR))) USCI_B2_ISR (void)
 		//Transmit interrupt
 		case USCI_I2C_UCTXIFG0:
 			
-			//If security session NOT open, then open it 
-			//Unable to write to tag unless session is open, so keep retrying each time
-			/*if(!isSecuritySessionOpen){
-				startSecuritySession();
-				isSecuritySessionOpen = status == I2C_TRANSACTION_SUCCESS ? 1 : 0;  
-			}*/
-
-			// Check again, we still want to send original message if we opened security session
-			// successfully
-			//if(isSecuritySessionOpen){
-					
-				// Write user payload
-			//writeI2CMessage(data, &dataLen);
-			//}
-			writeI2CMessage();
+            writeI2CByte();
 
 			// Check if the message was sent or not, use INPROGRESS because status
 			// can be NACK or SUCCESS

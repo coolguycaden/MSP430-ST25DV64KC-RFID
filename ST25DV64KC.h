@@ -1,6 +1,7 @@
 #ifndef ST25DV64KC_H
 #define ST25DV64KC_H
 
+#include <msp430fr5994.h>
 #include <stdint.h>
 /***********************************
  *
@@ -108,21 +109,24 @@
 // a given I2C transaction successful?
 typedef enum {
     I2C_TRANSACTION_NONE, 
+	I2C_TRANSACTION_BEGIN,
+	I2C_TRANSACTION_INPROGRESS,
     I2C_TRANSACTION_SUCCESS,
     I2C_TRANSACTION_NACK,
-	I2C_TRANSACTION_INPROGRESS,
-	I2C_TRANSACTION_BEGIN
+    I2C_TRANSACTION_FINISHED
 } I2C_Status;
+
+typedef enum {
+    TAG_SUCCESSFUL_WRITE,
+    TAG_SUCCESSFUL_READ,
+} Tag_Status; 
 
 
 //Set config for I2C for msp430FR5994, setting the peripheral address with parameter
 void initializeI2C();
 
 //Send a message given an array and its length
-I2C_Status sendMessage(volatile unsigned char * message, volatile unsigned char messageLength);
-
-
-
+I2C_Status sendMessage(volatile uint8_t * message, volatile uint32_t messageLength);
 
 
 #endif 
