@@ -22,14 +22,14 @@ TARGET = main
 INCL_SRC = $(wildcard *.c)
 INCL_H = $(wildcard *.h)
 
-all: $(TARGET) install
+all: $(TARGET) install clean
 
 # "$@ task label and $? is dependency list
 $(TARGET):	$(TARGET).c $(INCL_H) $(INCL_SRC) $(INCL_ST)
-	$(CC) $(CXXFLAGS) $(LFLAGS) -D __$(UPDEVICE)__ $? -o $@ 
+	$(CC) $(CXXFLAGS) $(LFLAGS) -D __$(UPDEVICE)__ $? -o $@.elf 
 
-%.c: 
-	$(CC) $(CXXFLAGS) $(LFLAGS) -D __$(UPDEVICE)__ -c 
+bear:
+	bear -- $(TARGET)
 
 # Upload to board
 install:	$(TARGET)

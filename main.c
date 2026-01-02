@@ -8,7 +8,7 @@
 // ID of each node
 #define NODE_ID 1 
 
-
+#define ONE_SECOND 1000000
 /******************************************************************************
  * Variable Declaration
  ******************************************************************************/
@@ -19,17 +19,18 @@ uint8_t TX_buffer[TX_BUFFER_SIZE] = {0};
 
 void initializeLEDs() {
     P1DIR |= BIT0 | BIT1;
-    P1OUT &= ~BIT0 & ~BIT1; 
+    P1OUT &= ~BIT0;
+    P1OUT &= ~BIT1; 
 }
 
 void checkStatus(I2C_Status status) {
     if(status == I2C_TRANSACTION_NACK) {
-        P1OUT |= BIT0;
+        P1OUT ^= BIT0;
     } else if(status == I2C_TRANSACTION_SUCCESS) {
-        P1OUT |= BIT1;
+        P1OUT ^= BIT1;
     }
 
-    __delay_cycles(1000000); 
+    __delay_cycles(ONE_SECOND); 
 }
 
 int main(void) {
@@ -45,7 +46,13 @@ int main(void) {
 	initializeI2C();
 	initializeLEDs();
 
+    int messages = 0;
+
     while(1) {
+        __delay_cycles(ONE_SECOND * 3);
+        if(messages > 5) {
+            break;
+        }
         TX_buffer[0] = RFID_TAG_STARTING_WRITE_ADDRESS_MSB;
         TX_buffer[1] = RFID_TAG_STARTING_WRITE_ADDRESS_LSB;
         TX_buffer[2] = NODE_ID;
@@ -55,10 +62,11 @@ int main(void) {
         TX_buffer[6] = 0xDD;
         TX_buffer[7] = 0xEE;
         TX_buffer[8] = 0xEF;
-        TX_buffer[9] = 0xFE;
-        TX_buffer[10] = 0xFF; 
+        TX_buffer[9] = 0xDD;
+        TX_buffer[10] = 0xDD; 
         
         I2C_Status status = sendMessage(TX_buffer, TX_BUFFER_SIZE);
         checkStatus(status);
+        messages++;
     }
 }

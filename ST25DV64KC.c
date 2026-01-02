@@ -22,21 +22,27 @@
  *
  ***********************/ 
 
+// Data to send with I2C interrupt
 static volatile uint8_t * TX_Payload;
-static volatile uint32_t * TX_Length;
-static volatile uint32_t TX_ByteCounter;
 
-//Track if security session is open, necessary to write to user memory of the tag
+// Length of data to send via I2C
+static volatile uint8_t * TX_Length;
+
+// Keep track of bytes sent via I2C for current payload 
+static volatile uint8_t TX_ByteCounter;
+
+// Track if security session is open, necessary to write to user memory of the tag
 static volatile uint8_t isSecuritySessionOpen = 0;
 
-//Define how many times to retry before failing
+// Define how many times to retry before failing
 const int MAX_RETRIES = 3;
-    
+  
+// Global status of I2C 
 static volatile I2C_Status status;
 
 
-//Length of the SecuriryMessage to transmit 
-static volatile uint32_t StartSecuritySessionMessageLength = 19;
+// Length of the SecurityMessage to transmit 
+static volatile uint8_t StartSecuritySessionMessageLength = 19;
 
 // Message to open security session of RFID Tag.
 //
@@ -114,14 +120,16 @@ void sleepAndWriteI2C() {
 
 
 static I2C_Status openSecuritySession() {
-    for(uint32_t x = 0; x < MAX_RETRIES; x++) {
+    for(uint8_t x = 0; x < MAX_RETRIES; x++) {
      
         TX_Payload = StartSecuritySessionMessage;
         TX_Length = &StartSecuritySessionMessageLength;
+        UCB2I2CSA = RFID_TAG_SECURITY_SESSION_CMD;
     
         sleepAndWriteI2C();
 
         if(status == I2C_TRANSACTION_SUCCESS) {
+            isSecuritySessionOpen = 1;
             return status;
         }
     }
@@ -180,8 +188,6 @@ void initializeI2C(){
 
 
 void writeI2CByte() {
-    static uint8_t successful_transaction = 0; 
-
     status = I2C_TRANSACTION_INPROGRESS;
      
 	if(TX_ByteCounter < *TX_Length){	
@@ -193,15 +199,17 @@ void writeI2CByte() {
 	} else {
 		
 		//Message is sent
-		status = I2C_TRANSACTION_FINISHED;	
+		status = I2C_TRANSACTION_SUCCESS;	
 
 		//Resets byte counter
 		TX_ByteCounter = 0; 	
-	}
+	
+	    UCB2CTLW0 |= UCTXSTP;
+    }
 }
 
 //Sends a message given a array of bytes and length to I2C, returns if message was sent successfully or not
-I2C_Status sendMessage(volatile uint8_t * message, volatile uint32_t messageLength) {
+I2C_Status sendMessage(volatile uint8_t * message, volatile uint8_t messageLength) {
 	 
 
     // Wait until stop condition has been sent
@@ -213,7 +221,8 @@ I2C_Status sendMessage(volatile uint8_t * message, volatile uint32_t messageLeng
     if(!isSecuritySessionOpen){
         openSecuritySession();      
     }
-
+    
+    UCB2I2CSA = RFID_TAG_USER_MEMORY_CMD;
 
 	for (int x = 0; x < MAX_RETRIES; x++) {   
         TX_Payload = message; 
@@ -223,9 +232,8 @@ I2C_Status sendMessage(volatile uint8_t * message, volatile uint32_t messageLeng
 
        	//Check if message was sent successfully 
         if (status == I2C_TRANSACTION_SUCCESS) {
-			isSecuritySessionOpen = status == I2C_TRANSACTION_SUCCESS ? 1 : 0;  
-
-			//Transacation was successful, return
+			
+            //Transacation was successful, return
             return I2C_TRANSACTION_SUCCESS;
 		}
 	}
@@ -264,7 +272,7 @@ void __attribute__ ((interrupt(EUSCI_B2_VECTOR))) USCI_B2_ISR (void)
 			UCB2CTLW0 |= UCTXSTP;
 			
 			//Clear NACK interrupt flag
-			UCB2IFG &= ~UCTXIFG;
+			UCB2IFG &= ~UCNACKIFG;
             
             TX_ByteCounter = 0;
 			status = I2C_TRANSACTION_NACK;
