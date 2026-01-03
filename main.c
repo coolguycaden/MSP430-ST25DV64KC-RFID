@@ -1,4 +1,7 @@
 #include "ST25DV64KC.h"
+
+
+
 /******************************************************************************
  * Globals
  ******************************************************************************/
@@ -8,7 +11,14 @@
 // ID of each node
 #define NODE_ID 1 
 
+// ONE_SECOND is the amount of cycles at a set MHz.
+// Base clock for MSP430FR5994 is 1 MHz, so 1,000,000 cycles in a second
+// Change this to match the clock rate you set
 #define ONE_SECOND 1000000
+
+
+
+
 /******************************************************************************
  * Variable Declaration
  ******************************************************************************/
@@ -33,6 +43,10 @@ void checkStatus(I2C_Status status) {
     __delay_cycles(ONE_SECOND); 
 }
 
+
+
+
+// Example Main Function
 int main(void) {
 
 	//Disable watchdog
@@ -51,8 +65,11 @@ int main(void) {
     while(1) {
         __delay_cycles(ONE_SECOND * 3);
         if(messages > 5) {
+            // stop sending messages after 5 messages
             break;
         }
+        
+        // Set data to send
         TX_buffer[0] = RFID_TAG_STARTING_WRITE_ADDRESS_MSB;
         TX_buffer[1] = RFID_TAG_STARTING_WRITE_ADDRESS_LSB;
         TX_buffer[2] = NODE_ID;
@@ -63,7 +80,7 @@ int main(void) {
         TX_buffer[7] = 0xEE;
         TX_buffer[8] = 0xEF;
         TX_buffer[9] = 0xDD;
-        TX_buffer[10] = 0xDD; 
+        TX_buffer[10] = 0x03; 
         
         I2C_Status status = sendMessage(TX_buffer, TX_BUFFER_SIZE);
         checkStatus(status);
