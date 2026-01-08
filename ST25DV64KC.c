@@ -23,26 +23,26 @@
  ***********************/ 
 
 // Data to send with I2C interrupt
-static volatile uint8_t * TX_Payload;
+static volatile uint8_t * TXPayload;
 
 // Length of data to send via I2C
-static volatile uint8_t * TX_Length;
+static volatile uint8_t * TXLength;
 
 // Keep track of bytes sent via I2C for current payload 
-static volatile uint8_t TX_ByteCounter;
+static volatile uint8_t TXByteCounter;
 
 // Track if security session is open, necessary to write to user memory of the tag
-static volatile uint8_t isSecuritySessionOpen = 0;
+static volatile uint8_t IsSecuritySessionOpen = 0;
 
 // Define how many times to retry before failing
 const int MAX_RETRIES = 3;
-  
-// Global status of I2C 
-static volatile I2C_Status status;
+
+// Global Status of I2C 
+static volatile I2C_Status Status;
 
 
 // Length of the SecurityMessage to transmit 
-static volatile uint8_t StartSecuritySessionMessageLength = 19;
+static uint8_t START_SECURITY_SESSION_MESSAGE_LENGTH = 19;
 
 // Message to open security session of RFID Tag.
 //
@@ -54,7 +54,7 @@ static volatile uint8_t StartSecuritySessionMessageLength = 19;
 // verification step.
 //
 // In this case, the PASSWORD define is just 0s (no password)
-static volatile uint8_t StartSecuritySessionMessage [19] = {
+static uint8_t START_SECURITY_SESSION_MESSAGE [19] = {
 	RFID_TAG_I2C_PASSWORD_ADDRESS_MSB,
 	RFID_TAG_I2C_PASSWORD_ADDRESS_LSB,
 	RFID_TAG_I2C_PASSWORD, 
@@ -122,15 +122,15 @@ void sleepAndWriteI2C() {
 static I2C_Status openSecuritySession() {
     for(uint8_t x = 0; x < MAX_RETRIES; x++) {
      
-        TX_Payload = StartSecuritySessionMessage;
-        TX_Length = &StartSecuritySessionMessageLength;
+        TXPayload = START_SECURITY_SESSION_MESSAGE;
+        TXLength = &START_SECURITY_SESSION_MESSAGE_LENGTH;
         UCB2I2CSA = RFID_TAG_SECURITY_SESSION_CMD;
-    
+
         sleepAndWriteI2C();
 
-        if(status == I2C_TRANSACTION_SUCCESS) {
-            isSecuritySessionOpen = 1;
-            return status;
+        if(Status == I2C_TRANSACTION_SUCCESS) {
+            IsSecuritySessionOpen = 1;
+            return Status;
         }
     }
 
@@ -188,50 +188,50 @@ void initializeI2C(){
 
 
 void writeI2CByte() {
-    status = I2C_TRANSACTION_INPROGRESS;
+    Status = I2C_TRANSACTION_INPROGRESS;
      
-	if(TX_ByteCounter < *TX_Length){	
+	if(TXByteCounter < *TXLength){	
 		
 		//Load data into transmit buffer
-		UCB2TXBUF = TX_Payload[TX_ByteCounter];
-		TX_ByteCounter++;
+		UCB2TXBUF = TXPayload[TXByteCounter];
+		TXByteCounter++;
 	
 	} else {
 		
 		//Message is sent
-		status = I2C_TRANSACTION_SUCCESS;	
+		Status = I2C_TRANSACTION_SUCCESS;	
 
 		//Resets byte counter
-		TX_ByteCounter = 0; 	
+		TXByteCounter = 0; 	
 	
 	    UCB2CTLW0 |= UCTXSTP;
     }
 }
 
 //Sends a message given a array of bytes and length to I2C, returns if message was sent successfully or not
-I2C_Status sendMessage(volatile uint8_t * message, volatile uint8_t messageLength) {
+I2C_Status sendMessage(uint8_t * message, uint8_t messageLength) {
 	 
 
     // Wait until stop condition has been sent
 	while(UCB2CTLW0 & UCTXSTP);
 
-	// Initial status of NONE
-	status = I2C_TRANSACTION_NONE;
+	// Initial Status of NONE
+	Status = I2C_TRANSACTION_NONE;
     
-    if(!isSecuritySessionOpen){
+    if(!IsSecuritySessionOpen){
         openSecuritySession();      
     }
     
     UCB2I2CSA = RFID_TAG_USER_MEMORY_CMD;
 
 	for (int x = 0; x < MAX_RETRIES; x++) {   
-        TX_Payload = message; 
-        TX_Length = &messageLength; 
+        TXPayload = message; 
+        TXLength = &messageLength; 
 
 		sleepAndWriteI2C();
 
        	//Check if message was sent successfully 
-        if (status == I2C_TRANSACTION_SUCCESS) {
+        if (Status == I2C_TRANSACTION_SUCCESS) {
 			
             //Transacation was successful, return
             return I2C_TRANSACTION_SUCCESS;
@@ -274,8 +274,8 @@ void __attribute__ ((interrupt(EUSCI_B2_VECTOR))) USCI_B2_ISR (void)
 			//Clear NACK interrupt flag
 			UCB2IFG &= ~UCNACKIFG;
             
-            TX_ByteCounter = 0;
-			status = I2C_TRANSACTION_NACK;
+            TXByteCounter = 0;
+			Status = I2C_TRANSACTION_NACK;
 
 			//Break out of LPM3
 			__bic_SR_register_on_exit(LPM3_bits);
@@ -288,9 +288,9 @@ void __attribute__ ((interrupt(EUSCI_B2_VECTOR))) USCI_B2_ISR (void)
 			
             writeI2CByte();
 
-			// Check if the message was sent or not, use INPROGRESS because status
+			// Check if the message was sent or not, use INPROGRESS because Status
 			// can be NACK or SUCCESS
-			if(status != I2C_TRANSACTION_INPROGRESS){
+			if(Status != I2C_TRANSACTION_INPROGRESS){
 				
 				//Clear transmit interrupt flag
 				UCB2IFG &= ~UCTXIFG;
