@@ -210,52 +210,92 @@ void initializeI2C(){
 }
 
 
+// In the name, write a byte in provided payload to I2C
+// Checks `PrependAddressFlag` to do automatic write address injection
 void writeI2CByte() {
     Status = I2C_TRANSACTION_INPROGRESS;
-     
-	if(TXByteCounter < *TXLength){	
-		
-		//Load data into transmit buffer
-		UCB2TXBUF = TXPayload[TXByteCounter];
-		TXByteCounter++;
-	
-	} else {
-		
-		//Message is sent
-		Status = I2C_TRANSACTION_SUCCESS;	
+    
+    // If injecting address, add 2 bytes to the length (MSB + LSB)
+    uint16_t totalLength = *TXLength + (PrependAddressFlag ? 2 : 0);
 
-		//Resets byte counter
-		TXByteCounter = 0; 	
-	
-	    UCB2CTLW0 |= UCTXSTP;
+    if(TXByteCounter < totalLength){    
+        
+        uint8_t byteToSend;
+
+        if (PrependAddressFlag) {
+            
+            if (TXByteCounter == 0) {
+                
+                // Send MSB of current address first
+                byteToSend = (CurrentTagWriteAddress >> 8) & 0xFF;
+            } else if (TXByteCounter == 1) {
+                
+                // Send LSB of current address second 
+                byteToSend = CurrentTagWriteAddress & 0xFF;
+            } else {
+                
+                // Send actual data payload, offset by two to account for MSB / LSB sent
+                byteToSend = TXPayload[TXByteCounter - 2];
+            }
+
+        } else {
+            
+            // Security Session, just send the payload
+            // (address MSB and LSB are already in message)
+            byteToSend = TXPayload[TXByteCounter];
+        }
+
+        // Load data into transmit buffer
+        UCB2TXBUF = byteToSend;
+        TXByteCounter++;
+    
+    } else {
+        // Message is sent
+        Status = I2C_TRANSACTION_SUCCESS;    
+        TXByteCounter = 0;     
+        UCB2CTLW0 |= UCTXSTP;
     }
 }
 
+
 //Sends a message given a array of bytes and length to I2C, returns if message was sent successfully or not
-I2C_Status sendMessage(uint8_t * message, uint8_t messageLength) {
+I2C_Status sendMessage(uint8_t * message, uint8_t * messageLength, uint8_t prependAddressFlag) {
 	 
 
     // Wait until stop condition has been sent
 	while(UCB2CTLW0 & UCTXSTP);
 
-	// Initial Status of NONE
+    // Initial Status of NONE
 	Status = I2C_TRANSACTION_NONE;
     
     if(!IsSecuritySessionOpen){
         openSecuritySession();      
     }
     
+    // Set user provided prependAddressFlag (do you want write address to be automatically calculated?)
+    PrependAddressFlag = prependAddressFlag;
+
+    // Switch to user memory command 
     UCB2I2CSA = RFID_TAG_USER_MEMORY_CMD;
 
+    // Ensure that user data can be stored contiguously within remaining address space
+    // if not, wrap around to start 
+    if (CurrentTagWriteAddress > RFID_TAG_ENDING_WRITE_ADDRESS_FULL + *messageLength) {
+        CurrentTagWriteAddress = RFID_TAG_STARTING_WRITE_ADDRESS_FULL;
+    }
+
 	for (int x = 0; x < MAX_RETRIES; x++) {   
+        
         TXPayload = message; 
-        TXLength = &messageLength; 
+        TXLength = messageLength; 
 
 		sleepAndWriteI2C();
 
        	//Check if message was sent successfully 
         if (Status == I2C_TRANSACTION_SUCCESS) {
-			
+			    
+            CurrentTagWriteAddress += *messageLength; 
+
             //Transacation was successful, return
             return I2C_TRANSACTION_SUCCESS;
 		}

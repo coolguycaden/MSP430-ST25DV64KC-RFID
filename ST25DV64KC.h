@@ -129,5 +129,6 @@ uint8_t getMaxRetries();
 void initializeI2C();
 
 //Send a message given an array and its length
-I2C_Status sendMessage(uint8_t * message, uint8_t messageLength);
+//Set prependAddressFlag if you wish to have write address automatically calculated and injected
+I2C_Status sendMessage(uint8_t * message, uint8_t * messageLength, uint8_t prependAddressFlag);
 #endif 
