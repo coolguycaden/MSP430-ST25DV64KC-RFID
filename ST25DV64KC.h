@@ -122,11 +122,12 @@ typedef enum {
 } Tag_Status; 
 
 
+void setMaxRetries(uint8_t newRetries);
+uint8_t getMaxRetries();
+
 //Set config for I2C for msp430FR5994, setting the peripheral address with parameter
 void initializeI2C();
 
 //Send a message given an array and its length
 I2C_Status sendMessage(uint8_t * message, uint8_t messageLength);
-
-
 #endif 

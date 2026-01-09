@@ -34,11 +34,27 @@ static volatile uint8_t TXByteCounter;
 // Track if security session is open, necessary to write to user memory of the tag
 static volatile uint8_t IsSecuritySessionOpen = 0;
 
+// Track the current (next available) address to write to in user address space
+static uint16_t CurrentTagWriteAddress = RFID_TAG_STARTING_WRITE_ADDRESS_FULL; 
+
+// Tell ISR if to inject address bytes first
+static volatile uint8_t PrependAddressFlag = 0;
+
 // Define how many times to retry before failing
-const int MAX_RETRIES = 3;
+static uint8_t MAX_RETRIES = 3;
 
 // Global Status of I2C 
 static volatile I2C_Status Status;
+
+
+
+
+/*******************************
+ *
+ * DEFINES
+ *
+ ***********************/ 
+
 
 
 // Length of the SecurityMessage to transmit 
@@ -147,6 +163,13 @@ static I2C_Status openSecuritySession() {
  *
  **********************/ 
 
+uint8_t getMaxRetries() {
+    return MAX_RETRIES;
+}
+
+void setMaxRetries(uint8_t newRetries) {
+    MAX_RETRIES = newRetries;
+}
 
 
 /******************************************
