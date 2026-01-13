@@ -1,6 +1,8 @@
 ## MSP430FR5994 RFID with ST25DV64KC
 This project implements an I2C interface between an MSP430FR5994 microcontroller and an ST25DV64KC Dynamic NFC/RFID tag. It writes data packets to the tag's user memory and utilizes onboard LEDs to indicate transaction status.
 
+The `main.c` program shows and example setup and usage of the library.
+
 # Hardware Requirements
 * Microcontroller: MSP-EXP430FR5994 LaunchPad Development Kit
 * RFID Tag: ST25DV64KC (Dynamic NFC/RFID tag)
