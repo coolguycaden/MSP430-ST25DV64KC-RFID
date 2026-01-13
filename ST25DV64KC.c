@@ -26,10 +26,10 @@
 static volatile uint8_t * TXPayload;
 
 // Length of data to send via I2C
-static volatile uint8_t * TXLength;
+static volatile uint32_t * TXLength;
 
 // Keep track of bytes sent via I2C for current payload 
-static volatile uint8_t TXByteCounter;
+static volatile uint32_t TXByteCounter;
 
 // Track if security session is open, necessary to write to user memory of the tag
 static volatile uint8_t IsSecuritySessionOpen = 0;
@@ -58,7 +58,7 @@ static volatile I2C_Status Status;
 
 
 // Length of the SecurityMessage to transmit 
-static uint8_t START_SECURITY_SESSION_MESSAGE_LENGTH = 19;
+static uint32_t START_SECURITY_SESSION_MESSAGE_LENGTH = 19;
 
 // Message to open security session of RFID Tag.
 //
@@ -259,7 +259,7 @@ void writeI2CByte() {
 
 
 //Sends a message given a array of bytes and length to I2C, returns if message was sent successfully or not
-I2C_Status sendMessage(uint8_t * message, uint8_t * messageLength, uint8_t prependAddressFlag) {
+I2C_Status sendMessage(uint8_t * message, uint32_t * messageLength, uint8_t prependAddressFlag) {
 	 
 
     // Wait until stop condition has been sent
@@ -295,6 +295,9 @@ I2C_Status sendMessage(uint8_t * message, uint8_t * messageLength, uint8_t prepe
         if (Status == I2C_TRANSACTION_SUCCESS) {
 			    
             CurrentTagWriteAddress += *messageLength; 
+               
+            // small delay to allow tag to recover and finish write 
+            __delay_cycles(10000);
 
             //Transacation was successful, return
             return I2C_TRANSACTION_SUCCESS;
